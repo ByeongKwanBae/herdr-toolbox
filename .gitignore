@@ -1,0 +1,19 @@
+# Local planning documents in any module
+**/PRD.md
+**/SPEC.md
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local SDK, verification artifacts, and worktrees
+.cache/
+artifacts/
+.worktrees/
+
+# Local environment values
+.env
+.env.*
+!.env.example
