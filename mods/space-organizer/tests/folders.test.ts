@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { absoluteFolder, folderRequest, childFolder, parentFolder, posixPage, windowsPage, FolderBrowser, FOLDER_LIMIT, type FolderPage } from "../src/core/folders.js";
-import { RemoteDirectory, encodedPowerShell, windowsFoldersScript, POSIX_FOLDERS, POSIX_VALIDATE_FOLDER, type DirectoryExec } from "../src/host/remote-directory.js";
+import { absoluteFolder, folderRequest, childFolder, parentFolder, newFolderName, posixPage, windowsPage, FolderBrowser, FOLDER_LIMIT, type FolderPage } from "../src/core/folders.js";
+import { RemoteDirectory, encodedPowerShell, windowsFoldersScript, POSIX_FOLDERS, POSIX_VALIDATE_FOLDER, POSIX_ADD_FOLDER, type DirectoryExec } from "../src/host/remote-directory.js";
 import { FolderCreation, creationCandidates, type CreationSpace } from "../src/core/creation.js";
 import { remoteCreationAdapter, type RemoteCreationApi } from "../src/host/creation-adapter.js";
 
@@ -28,6 +28,33 @@ test("folder requests accept absolute paths and home aliases, rejecting relative
   assert.equal(absoluteFolder("C:relative", "windows"), false);
   assert.doesNotThrow(() => folderRequest("\\\\server\\share\\한글 folder", "windows"));
   assert.doesNotThrow(() => folderRequest("~\\Documents", "windows"));
+});
+test("new folder names reject traversal and controls while preserving literal POSIX filename data", () => {
+  for (const name of ["", "   ", ".", "..", "../escape", "/absolute", "two/folders", "bad\0name", "line\nbreak", "tab\tname", "bad\x7f"]) assert.throws(() => newFolderName(name));
+  for (const name of ["한글 😀 folder", "O'Brien $(touch marker) `x`", "--option", "back\\slash", " leading and trailing "]) assert.equal(newFolderName(name), name);
+});
+
+for (const platform of ["linux", "macos"] as const) test(`${platform} adds a single folder using separate argv without replaying the mutation`, async () => {
+  const calls: string[][] = [], name = "한글 O'Brien $(touch marker) `x`";
+  let attempts = 0;
+  const reader = new RemoteDirectory("remote", async (_command, args, options) => {
+    assert.equal(options.on, "remote"); calls.push(args);
+    if (calls.length === 1) return { code: 0, stdout: platform, stderr: "" };
+    if (args[1] === POSIX_ADD_FOLDER) {
+      attempts++;
+      assert.equal(args.at(-2), "/parent"); assert.equal(args.at(-1), name);
+      assert.equal(args[1].includes(name), false);
+      return attempts === 1 ? { code: 0, stdout: posix(`/parent/${name}`), stderr: "" } : { code: 1, stdout: "", stderr: "File exists" };
+    }
+    return { code: 0, stdout: posix("/parent"), stderr: "" };
+  });
+  assert.equal((await reader.addFolder("/parent", name)).path, `/parent/${name}`);
+  await assert.rejects(reader.addFolder("/parent", name), /File exists/);
+  assert.equal(attempts, 2);
+});
+test("invalid Add Folder requests cause no remote operations", async () => {
+  const reader = new RemoteDirectory("remote", async () => assert.fail("invalid names must not reach the machine"));
+  for (const name of ["", ".", "..", "../escape", "line\nbreak"]) await assert.rejects(reader.addFolder("/parent", name));
 });
 test("POSIX listing preserves Unicode, quotes, backslashes and newlines as filename data", () => {
   const names = ["한글 folder", "O'Brien $(touch nope) `x`", "back\\slash", "line\nbreak"];

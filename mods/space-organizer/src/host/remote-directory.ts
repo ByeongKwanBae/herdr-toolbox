@@ -1,16 +1,25 @@
-import { folderRequest, posixPage, windowsPage, type FolderPage, type FolderPlatform } from "../core/folders.js";
+import { folderRequest, newFolderName, posixPage, windowsPage, type FolderPage, type FolderPlatform } from "../core/folders.js";
 
 export interface DirectoryResult { code: number; stdout: string; stderr: string }
 export type DirectoryExec = (command: string, args: string[], options: { on: string; timeout: number }) => Promise<DirectoryResult>;
 export const POSIX_PLATFORM = 'case "$(uname -s)" in Linux) printf linux;; Darwin) printf macos;; *) exit 64;; esac';
-const POSIX_FOLDER_HEADER = `p=$1
+const POSIX_ENTER_FOLDER = `p=$1
 case "$p" in ''|'~') p=$HOME;; '~/'*) p=$HOME/\${p#\\~/};; esac
 case "$p" in /*) ;; *) printf '%s\\n' 'Use an absolute folder path or ~.' >&2; exit 1;; esac
 CDPATH= cd -P "$p" || exit 1
-if ! [ -r . ] || ! [ -x . ]; then printf '%s\\n' 'Cannot read this folder.' >&2; exit 1; fi
+if ! [ -r . ] || ! [ -x . ]; then printf '%s\\n' 'Cannot read this folder.' >&2; exit 1; fi`;
+const POSIX_FOLDER_HEADER = `${POSIX_ENTER_FOLDER}
 printf 'SO-FOLDERS-1\\000%s\\000%s\\000' "$HOME" "$PWD"`;
 /** Validates the selected directory without expanding its children. */
 export const POSIX_VALIDATE_FOLDER = `${POSIX_FOLDER_HEADER}
+exit 0`;
+
+export const POSIX_ADD_FOLDER = `${POSIX_ENTER_FOLDER}
+name=$2
+case "$name" in ''|.|..|*/*) printf '%s\\n' 'Enter a single folder name.' >&2; exit 1;; esac
+mkdir "$PWD/$name" || exit 1
+CDPATH= cd -P "$PWD/$name" || exit 1
+printf 'SO-FOLDERS-1\\000%s\\000%s\\000' "$HOME" "$PWD"
 exit 0`;
 export const POSIX_FOLDERS = `${POSIX_FOLDER_HEADER}
 n=0
@@ -73,6 +82,14 @@ export class RemoteDirectory {
   }
   async read(path?: string): Promise<FolderPage> { return this.inspect(path, false); }
   async validate(path: string): Promise<string> { return (await this.inspect(path, true)).path; }
+  async addFolder(parent: string, name: string): Promise<FolderPage> {
+    newFolderName(name);
+    const page = await this.inspect(parent, true);
+    if (page.platform === "windows") throw new Error("Add Folder is available on Linux and macOS machines.");
+    const result = await this.execute("sh", ["-c", POSIX_ADD_FOLDER, "space-organizer-add-folder", page.path, name], { on: this.machine, timeout: 10000 });
+    if (result.code !== 0) throw failure(result);
+    return posixPage(result.stdout, page.platform);
+  }
   private async inspect(path: string | undefined, validateOnly: boolean): Promise<FolderPage> {
     if (!this.platform) {
       try {

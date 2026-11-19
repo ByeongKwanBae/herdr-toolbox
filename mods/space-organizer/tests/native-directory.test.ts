@@ -31,6 +31,18 @@ test("native directory scripts preserve filenames, cap listings and validate wit
     assert.equal(page.path, canonical);
     assert.deepEqual(new Set(page.folders.map(entry => entry.name)), new Set([...names, "folder-link"]));
     assert.equal(await reader.validate(root), canonical);
+    if (!windows) {
+      const name = "new 한글 O'Brien $(touch INJECTION-MARKER) `x`";
+      const added = await reader.addFolder(root, name);
+      assert.equal(added.path, join(canonical, name));
+      assert.deepEqual(added.folders, []);
+      await assert.rejects(reader.addFolder(root, name));
+      await assert.rejects(reader.addFolder(root, "plain-file"));
+      await assert.rejects(reader.addFolder(root, "../escape"));
+      const entries = await reader.read(root);
+      assert.ok(entries.folders.some(entry => entry.name === name));
+      assert.equal(entries.folders.some(entry => entry.name === "INJECTION-MARKER"), false);
+    }
     assert.equal((await reader.read(join(root, names[0]))).folders.length, 0);
     for (const name of ["missing", "plain-file"]) {
       await assert.rejects(reader.validate(join(root, name)), error => {

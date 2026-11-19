@@ -1,15 +1,15 @@
 # Space Organizer 개발 구조
 
-개발 빌드 `0.0.1-dev.2`, Herdr App 0.1.16 기준이며 미출시입니다.
+개발 빌드 `0.0.1-dev.3`, Herdr App 0.1.16 기준이며 미출시입니다.
 
 | 경로 | 책임 |
 |---|---|
 | src/main.ts | 유일한 Herdr View 진입점, props.view 검증과 sidebar/menu/group/folders 선택, 종료 훅 |
 | src/ui/sidebar.ts | 기본 Spaces 포팅, 그룹 표시, 머신·git 조회와 제한된 순서 동기화 태스크 |
 | src/ui/overlay.ts | 그룹·Space 메뉴, 이름 입력·삭제 확인, 기본 worktree 대화상자 연결 |
-| src/ui/folders.ts | 원격 폴더 팝업, 탐색·오류·생성 상태와 그룹 소속 연결 |
+| src/ui/folders.ts | 원격 폴더 팝업, 탐색·폴더 생성·Space 생성 상태와 그룹 소속 연결 |
 | src/core/folders.ts | 플랫폼별 절대 경로·부모·하위 경로, 폴더 응답 검증, 최신 탐색만 반영 |
-| src/host/remote-directory.ts | 원격 OS 탐지, POSIX argv·PowerShell 인코딩 전송, 500개 폴더 제한 |
+| src/host/remote-directory.ts | 원격 OS 탐지, POSIX argv·PowerShell 인코딩 전송, 500개 폴더 제한, POSIX 단일 하위 폴더 생성 |
 | src/core/model.ts | schema 1·이름·소속 검증, 자체 소유 키 조회, 상태 우선순위 |
 | src/core/groups.ts | 불변 그룹 변경, 삭제 지연 관찰, 선택 그룹 펼침 |
 | src/core/ordering.ts | 머신별 그룹·worktree 통합 순서와 이동 시뮬레이션, 재시도 예산 |

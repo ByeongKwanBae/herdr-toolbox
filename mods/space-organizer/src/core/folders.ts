@@ -24,6 +24,11 @@ export function childFolder(parent: string, name: string, platform: FolderPlatfo
   const separator = platform === "windows" ? "\\" : "/";
   return parent.replace(platform === "windows" ? /[\\/]+$/ : /\/+$/, "") + separator + name;
 }
+/** One new child only; never accept a path, traversal or invisible control characters. */
+export function newFolderName(name: string): string {
+  if (!name.trim() || name === "." || name === ".." || /[\u0000-\u001f\u007f/]/u.test(name)) throw new Error("Enter a single folder name without / or control characters; . and .. are not allowed.");
+  return name;
+}
 export function parentFolder(path: string, platform: FolderPlatform): string | null {
   if (!absoluteFolder(path, platform)) return null;
   if (platform !== "windows") {
