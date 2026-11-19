@@ -2,13 +2,13 @@
 
 Herdr App의 작업 공간과 개발 흐름을 확장하는 mod 모음입니다. 하나의 저장소에서 여러 mod를 관리하고, 필요한 mod를 골라 설치할 수 있도록 개발합니다.
 
-현재는 저장소 구성과 첫 mod의 설계를 준비한 단계입니다. 설치 가능한 릴리스는 아직 없습니다. 개발은 TypeScript를 사용하고, Herdr에 설치할 때는 JavaScript로 빌드한 파일을 배포할 계획입니다.
+첫 mod의 그룹 관리·로컬 폴더 선택을 구현하고 로컬·원격 worktree 흐름을 검증한 단계입니다. 설치 가능한 릴리스는 아직 없습니다. TypeScript로 개발하고 Herdr에서 실행하는 JavaScript ESM으로 빌드합니다.
 
 ## 모듈
 
 | 모듈 | 설명 | 최신 배포 버전 | 다음 목표 | 상태 | 변경 이력 |
 |---|---|---|---|---|---|
-| [Space Organizer](mods/space-organizer/README.md) | Space 그룹 관리와 로컬 폴더를 선택한 새 Space 생성 | 미출시 | `v0.0.1` | 설계 단계 | [CHANGE](mods/space-organizer/CHANGE.md) |
+| [Space Organizer](mods/space-organizer/README.md) | Space 그룹 관리와 로컬 폴더를 선택한 새 Space 생성 | 미출시 | `v0.0.1` | 그룹·순서·자동 소속 구현, 원격·worktree 실행 검증, 배포 준비 전 | [CHANGE](mods/space-organizer/CHANGE.md) |
 
 최신 배포 버전에는 실제로 배포한 버전만 기록합니다. 모듈을 추가할 때 이 표에 소개와 문서 링크를 등록하고, 릴리스할 때 버전별 GitHub Release 링크를 연결합니다. 각 모듈의 `Unreleased` 변경 사항은 다음 목표 버전과 구분합니다.
 
@@ -38,7 +38,7 @@ herdr-toolbox/
 └─ scripts/                      # 저장소 공통 개발 및 배포 도구
 ```
 
-`src/`와 `tests/`는 디렉터리만 준비한 상태입니다. 공통 코드와 실행 스크립트는 실제 기능을 구현하면서 추가합니다. 모듈 내부의 폴더 구조는 각 모듈의 책임과 검증 방법에 맞춰 확장합니다.
+Space Organizer의 `src/`와 `tests/`에는 포팅한 UI, 로컬 생성 로직과 테스트가 있습니다. 모듈 내부 `scripts/`에서 SDK 준비, 타입 검사, ESM 빌드와 개발용 동기화를 제공합니다. 실행 방법과 검증 결과는 모듈 README에서 확인합니다. 공통 코드와 도구는 여러 mod가 실제로 함께 사용할 때 추가합니다.
 
 ## 개발과 협업
 

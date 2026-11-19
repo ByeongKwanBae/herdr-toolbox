@@ -1,0 +1,13 @@
+{
+  "appVersion": "0.1.16",
+  "files": {
+    "herdr.d.ts": "c03de12283c2d831baf4f32fa1009d8cccef5c063654cbb8e0569bd8555ab29b",
+    "gpui-kit.d.ts": "6bc6aea3484348b99d8ccc019360d24edaffc422931cd9a98ab5286da9d10d08"
+  },
+  "upstream": {
+    "mods/spaces/main.js": "eef42839285ec5023c07362a807179a7f65062b3ed3a834dc52efaea3153618a",
+    "mods/spaces/mod.json": "0542737574ed87acce631aded07349a4fa617c5c3001d454593c55fabc6288a3",
+    "mods/menu/main.js": "17a524788ef5db4c312dde93dc268674167baa40ee82128cacdfd24db46d3316",
+    "mods/worktree/main.js": "7340dbf6ea1fbae6f5c295a4610f4f9d249799c700103b07efdcca6eff26d2a7"
+  }
+}
