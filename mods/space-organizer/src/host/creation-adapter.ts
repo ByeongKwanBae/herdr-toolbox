@@ -20,3 +20,30 @@ export function creationAdapter(api: CreationApi, pause: (ms: number) => Promise
     },
   };
 }
+
+export interface RemoteCreationApi {
+  checking(): boolean;
+  ready(): boolean;
+  validateFolder(path: string): Promise<string>;
+  spaces(): readonly CreationSpace[];
+  run(command: string, args: Record<string, unknown>): unknown;
+  failed(message: string): void;
+}
+export function remoteCreationAdapter(api: RemoteCreationApi, machine: string, selected: string, pause: (ms: number) => Promise<void>): CreationHost {
+  const ready = () => { if (!api.ready()) throw new Error("This machine is not ready. Reconnect and retry."); };
+  return {
+    checking: () => api.checking(),
+    pickFolder: async () => {
+      if (api.checking()) return null;
+      ready();
+      const path = await api.validateFolder(selected);
+      if (api.checking()) return null;
+      ready();
+      return path;
+    },
+    spaces: () => api.spaces(),
+    create: folder => { if (!api.checking()) { ready(); api.run("space.new", { machine, folder }); } },
+    pause,
+    failed: message => { if (!api.checking()) api.failed(message); },
+  };
+}

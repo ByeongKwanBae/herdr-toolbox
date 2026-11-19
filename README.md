@@ -2,13 +2,13 @@
 
 Herdr App의 작업 공간과 개발 흐름을 확장하는 mod 모음입니다. 하나의 저장소에서 여러 mod를 관리하고, 필요한 mod를 골라 설치할 수 있도록 개발합니다.
 
-첫 mod의 그룹 관리·로컬 폴더 선택을 구현하고 로컬·원격 worktree 흐름을 검증한 단계입니다. 설치 가능한 릴리스는 아직 없습니다. TypeScript로 개발하고 Herdr에서 실행하는 JavaScript ESM으로 빌드합니다.
+첫 mod의 그룹 관리·로컬/원격 폴더 선택을 구현하고 로컬·원격 worktree 흐름을 검증한 단계입니다. 설치 가능한 릴리스는 아직 없습니다. TypeScript로 개발하고 Herdr에서 실행하는 JavaScript ESM으로 빌드합니다.
 
 ## 모듈
 
 | 모듈 | 설명 | 최신 배포 버전 | 다음 목표 | 상태 | 변경 이력 |
 |---|---|---|---|---|---|
-| [Space Organizer](mods/space-organizer/README.md) | Space 그룹 관리와 로컬 폴더를 선택한 새 Space 생성 | 미출시 | `v0.0.1` | 그룹·순서·자동 소속 구현, 원격·worktree 실행 검증, 배포 준비 전 | [CHANGE](mods/space-organizer/CHANGE.md) |
+| [Space Organizer](mods/space-organizer/README.md) | Space 그룹 관리와 로컬·원격 폴더를 선택한 새 Space 생성 | 미출시 | `v0.0.1` | 그룹·순서·원격 탐색 구현, WSL 생성·worktree 검증, 배포 준비 전 | [CHANGE](mods/space-organizer/CHANGE.md) |
 
 최신 배포 버전에는 실제로 배포한 버전만 기록합니다. 모듈을 추가할 때 이 표에 소개와 문서 링크를 등록하고, 릴리스할 때 버전별 GitHub Release 링크를 연결합니다. 각 모듈의 `Unreleased` 변경 사항은 다음 목표 버전과 구분합니다.
 

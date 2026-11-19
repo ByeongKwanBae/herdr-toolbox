@@ -14,7 +14,7 @@ function check(directory) {
 }
 check("./dist/mods/space-organizer");
 // Check eagerly constructed native elements in both self-overlay views too.
-for (const view of ["menu", "group"]) {
+for (const view of ["menu", "group", "folders"]) {
   const directory = join(root, ".cache/app-checks", view);
   await mkdir(directory, { recursive: true });
   await copyFile(join(root, "dist/mods/space-organizer/main.js"), join(directory, "organizer.js"));

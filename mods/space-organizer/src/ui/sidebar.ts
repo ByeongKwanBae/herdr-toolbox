@@ -186,6 +186,10 @@ export default class Spaces {
   private organizerMenu(machine: MachineKey = null, group?: string): void {
     if (!checking()) openOverlay({ mod: "space-organizer", kind: "popup", width: 280, height: 460, props: { view: "menu", machine, group } });
   }
+  private remote(machine: string, group?: string): void {
+    if (checking()) return;
+    openOverlay({ mod: "space-organizer", kind: "dialog", width: 660, height: 600, props: { view: "folders", machine, group } });
+  }
   private groupChange(change: GroupChange, cx: Context): void {
     if (checking()) return;
     try { this.store.change(change); }
@@ -556,11 +560,11 @@ export default class Spaces {
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(group.name))
         .child(div().flex_none().text_size(11).text_color(t.muted).child(ready ? String(members.length) : "?"))
         .when(!!status, el => el.child(div().text_color(tone(t, status)).tooltip(status!).child(glyph(status))))
-        .when(machine === null, el => el.child(div().id(`group-new-${group.id}`).px(5).flex_none().rounded(4)
-          .tooltip("Choose a local folder in this group").when(this.creation.busy || !ready, el => el.opacity(0.4))
+        .child(div().id(`group-new-${group.id}`).px(5).flex_none().rounded(4)
+          .tooltip(machine ? "Choose a remote folder in this group" : "Choose a local folder in this group").when((!machine && this.creation.busy) || !ready, el => el.opacity(0.4))
           .on_mouse_down("left", (_event, cx) => { this.cancelDrag(cx); cx.stop_propagation(); })
           .on_mouse_up("left", (_event, cx) => cx.stop_propagation())
-          .on_click((_event, cx) => { cx.stop_propagation(); if (ready) this.local(cx, group.id); }).child(this.creation.busy ? "…" : "+")));
+          .on_click((_event, cx) => { cx.stop_propagation(); if (ready) { if (machine) this.remote(machine, group.id); else this.local(cx, group.id); } }).child(!machine && this.creation.busy ? "…" : "+"));
       rendered.push({ element: head, active: false });
       if (!group.folded) rendered.push(...rows.filter(row => spaceGroup(this.groups, row.w)?.id === group.id).map(drawMember));
     }
@@ -635,16 +639,16 @@ export default class Spaces {
               .on_click((_e, cx) => { cx.stop_propagation(); this.reconnect(machine, cx); })
               .child(repair?.busy ? "Connecting…" : "Connect"))))
           .when(connected, el => el.child(div().id(`machine-add-${m ?? "local"}`).flex_none().px(4).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
-            .tooltip(m ? `New space on ${m}` : "Choose a local folder")
+            .tooltip(m ? `Choose a folder on ${m}` : "Choose a local folder")
             .when(!m && this.creation.busy, el => el.opacity(0.4))
-            .on_click((_e, cx) => { cx.stop_propagation(); if (m) run("space.new", { machine: m }); else this.local(cx); }).child(!m && this.creation.busy ? "…" : "+")))
+            .on_click((_e, cx) => { cx.stop_propagation(); if (m) this.remote(m); else this.local(cx); }).child(!m && this.creation.busy ? "…" : "+")))
           .child(div().id(`machine-menu-${m ?? "local"}`).flex_none().px(3).rounded(4).tooltip("Group actions")
             .on_click((_event, cx) => { cx.stop_propagation(); this.organizerMenu(m); }).child("⋯"))
           .child(div().size(6).rounded(3).flex_none().bg(connected ? t.ansi2 : t.dim))
           .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(11).flex_none()));
       const empty = h_flex().id(`machine-new-${m ?? "local"}`).h(28).flex_none().px(collapsed ? 0 : 8).gap(7).items_center().rounded(7)
         .text_size(12).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
-        .on_click((_e, cx) => { if (m) run("space.new", { machine: m }); else this.local(cx); })
+        .on_click((_e, cx) => { if (m) this.remote(m); else this.local(cx); })
         .when(collapsed, el => el.w(RAIL_CELL).rounded(6).justify_center().tooltip(`New space on ${m ?? "this computer"}`)
           .child(h_flex().size(18).rounded(5).border_1().border_color(t.dim).items_center().justify_center()
             .child(svg("mods/workspace-chrome/plus.svg").size(10))))

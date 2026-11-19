@@ -1,16 +1,19 @@
 # Space Organizer 개발 구조
 
-개발 빌드 `0.0.1-dev.1`, Herdr App 0.1.16 기준이며 미출시입니다.
+개발 빌드 `0.0.1-dev.2`, Herdr App 0.1.16 기준이며 미출시입니다.
 
 | 경로 | 책임 |
 |---|---|
-| src/main.ts | 유일한 Herdr View 진입점, props.view 검증과 sidebar/menu/group 선택 |
+| src/main.ts | 유일한 Herdr View 진입점, props.view 검증과 sidebar/menu/group/folders 선택, 종료 훅 |
 | src/ui/sidebar.ts | 기본 Spaces 포팅, 그룹 표시, 머신·git 조회와 제한된 순서 동기화 태스크 |
 | src/ui/overlay.ts | 그룹·Space 메뉴, 이름 입력·삭제 확인, 기본 worktree 대화상자 연결 |
+| src/ui/folders.ts | 원격 폴더 팝업, 탐색·오류·생성 상태와 그룹 소속 연결 |
+| src/core/folders.ts | 플랫폼별 절대 경로·부모·하위 경로, 폴더 응답 검증, 최신 탐색만 반영 |
+| src/host/remote-directory.ts | 원격 OS 탐지, POSIX argv·PowerShell 인코딩 전송, 500개 폴더 제한 |
 | src/core/model.ts | schema 1·이름·소속 검증, 자체 소유 키 조회, 상태 우선순위 |
 | src/core/groups.ts | 불변 그룹 변경, 삭제 지연 관찰, 선택 그룹 펼침 |
 | src/core/ordering.ts | 머신별 그룹·worktree 통합 순서와 이동 시뮬레이션, 재시도 예산 |
-| src/core/creation.ts | 동기 예약, 생성 후보와 5초 마감, 유효한 로컬 그룹 자동 소속 |
+| src/core/creation.ts | 로컬/원격 동기 예약, 머신·플랫폼별 생성 후보와 5초 마감, 그룹 자동 소속 |
 | src/core/drag.ts | 5px 드래그 판정, 같은 머신 대상 제한, 드롭 직전 존재·ready 재검증 |
 | src/host/group-store.ts | 주입 가능한 상태 읽기·저장 경계, 모든 쓰기 직전 재조회 |
 | src/host/groups.ts | 실제 Herdr GroupStore 생성 |
@@ -79,6 +82,12 @@ GroupDrag는 인스턴스 메모리에만 포인터 시작점·Space ID·머신�
 머신 간 이동·임의 순서 변경·스크롤 경계 자동 스크롤은 제공하지 않습니다.
 
 ## 검증과 배포 경계
+
+원격 폴더는 exec의 on 인자를 고정하며 POSIX에는 경로를 별도 argv로, Windows에는 UTF-16LE base64 데이터로 전달합니다.
+OS만 팝업 수명 동안 캐시하고 디렉터리 목록은 매번 재조회합니다. 생성 직전에 폴더·연결 상태를 다시 확인합니다.
+탐색의 세대 번호와 close 훅은 늦게 끝난 목록을 무시합니다. 생성 후보는 POSIX에서는 경로 대소문자를 구분합니다.
+새 Space는 기존 space.new 계약을 사용하며 기존 터미널에 cd 명령을 입력하지 않습니다.
+실제 WSL 전체 흐름, 로컬 Windows PowerShell 조회, macOS 계약 테스트와 미검증 실기 범위를 README에 구분합니다.
 
 순수 로직·어댑터 테스트와 초기 네이티브 검사, 실제 앱 조작을 구분합니다.
 원격·worktree 전체 실행은 샘플 저장소로 확인하며 기존 업무 Space를 종료하지 않습니다.
