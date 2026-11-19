@@ -46,7 +46,9 @@ export function posixPage(output: string, platform: "linux" | "macos"): FolderPa
 }
 function record(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value); }
 export function windowsPage(output: string): FolderPage {
-  const raw: unknown = JSON.parse(output.replace(/^\uFEFF/, ""));
+  let raw: unknown;
+  try { raw = JSON.parse(output.replace(/^\uFEFF/, "")); }
+  catch { throw new Error("Invalid remote folder response."); }
   if (!record(raw) || raw.version !== 1 || typeof raw.path !== "string" || typeof raw.home !== "string" || !Array.isArray(raw.roots) || !Array.isArray(raw.folders)) throw new Error("Invalid remote folder response.");
   const path = raw.path, home = raw.home;
   if (!absoluteFolder(path, "windows") || !absoluteFolder(home, "windows") || raw.roots.length > 64 || raw.folders.length > FOLDER_LIMIT + 1) throw new Error("Invalid remote folder response.");
@@ -64,12 +66,17 @@ export class FolderBrowser {
   loading = false;
   error = "";
   private generation = 0;
+  private addressRevision = 0;
+  private navigatingRevision = 0;
   private closed = false;
   constructor(private readonly read: (path?: string) => Promise<FolderPage>) {}
   get selectable(): boolean { return !this.closed && !this.loading && !this.error && !!this.page; }
+  noteAddressEdit(): void { this.addressRevision++; }
+  get canSyncAddress(): boolean { return this.addressRevision === this.navigatingRevision; }
   async navigate(path?: string): Promise<boolean> {
     if (this.closed) return false;
     const generation = ++this.generation;
+    this.navigatingRevision = this.addressRevision;
     this.loading = true; this.error = "";
     try {
       const page = await this.read(path);

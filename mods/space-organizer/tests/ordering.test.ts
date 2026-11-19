@@ -41,6 +41,27 @@ test("permutation and cross-machine violations are rejected before commands", ()
   for (const target of [["a", "a"], ["a"], ["a", "missing"], ["r", "a"]]) assert.throws(() => movePlan(current, target));
 });
 
+test("interleaved host machines pause safely, warn once and recover only after reset", () => {
+  const sync = new OrderSynchronizer();
+  const mixed = [space("a"), space("r", "remote"), space("b")];
+  const target = desiredOrder(mixed, emptyGroups()).map(item => item.id);
+  const first = sync.step(mixed, target, 0);
+  assert.deepEqual(first.moves, []); assert.equal(first.warn, true);
+  assert.match(first.error!, /machine blocks/); assert.equal(sync.failed, true);
+  assert.equal(sync.step(mixed, target, 10000).warn, false);
+  const current = [space("a"), space("b"), space("r", "remote")];
+  assert.deepEqual(sync.step(current, ["b", "a", "r"], 10001).moves, []);
+  sync.reset();
+  assert.deepEqual(sync.step(current, ["b", "a", "r"], 10002).moves, [{ id: "b", index: 1 }]);
+});
+
+test("malformed snapshots cannot escape the synchronizer or emit partial commands", () => {
+  for (const target of [["a", "a"], ["unknown"], []]) {
+    const step = new OrderSynchronizer().step([space("a"), space("b")], target, 0);
+    assert.deepEqual(step.moves, []); assert.equal(step.warn, true); assert.ok(step.error);
+  }
+});
+
 test("generated reverse and rotation plans converge for varied block sizes", () => {
   for (let count = 0; count <= 25; count++) {
     const local = Array.from({ length: count }, (_, i) => space(`s${i}`));

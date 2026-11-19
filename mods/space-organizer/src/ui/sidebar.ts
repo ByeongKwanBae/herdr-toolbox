@@ -5,11 +5,12 @@
 
 /*! Modified from Herdr App 0.1.16 Spaces; Apache-2.0. See LICENSE and THIRD_PARTY_NOTICES.md. */
 import { div, svg, type Context, type AsyncContext, type Color } from "gpui-kit";
-import { v_flex, h_flex, ScrollHandle } from "gpui-base";
+import { Button, v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { spaces, machines, panes, openOverlay, shared, watchFolder, window, layout, checking, pickFolder, notify, nextCommand, type SpaceInfo, type PaneInfo, type Status, type ExecResult, type FolderWatch } from "herdr";
 import { safeRun as run, safeSetShared as setShared, safeExec as exec, safeHc as hc, colorState, color as parseColor, themeColors } from "../host/herdr-adapter.js";
 import { LocalCreation } from "../core/creation.js";
 import { creationAdapter } from "../host/creation-adapter.js";
+import { linkedCheckout } from "../host/checkout.js";
 import { groupStore } from "../host/groups.js";
 import { emptyGroups, spaceGroup, groupStatus, machineReady, type GroupState, type MachineKey } from "../core/model.js";
 import { MembershipPruner, type GroupChange } from "../core/groups.js";
@@ -111,7 +112,9 @@ export default class Spaces {
   private copiedLogin: string | null = null;
   private revealed: string | undefined;
   private revealedAt = -1;
-  private creation = new LocalCreation(checking);
+  private closed = false;
+  // The check harness has no OS window and never permits folder creation.
+  private creation = new LocalCreation(() => checking() || this.closed, Date.now, { machine: null, platform: checking() ? "windows" : window().platform });
   private store = groupStore();
   private groups: GroupState = emptyGroups();
   private pruner = new MembershipPruner();
@@ -170,7 +173,7 @@ export default class Spaces {
     cx.notify();
     cx.spawn(async cx => {
       // phase() validates task ownership after every await, including picker return.
-      const activeChecking = () => { cx.phase(); return checking(); };
+      const activeChecking = () => { cx.phase(); return checking() || this.closed; };
       const host = creationAdapter({ checking: activeChecking, pickFolder, spaces, run, notify }, ms => cx.sleep(ms));
       host.validGroup = id => {
         if (activeChecking()) return false;
@@ -188,7 +191,7 @@ export default class Spaces {
   }
   private remote(machine: string, group?: string): void {
     if (checking()) return;
-    openOverlay({ mod: "space-organizer", kind: "dialog", width: 660, height: 600, props: { view: "folders", machine, group } });
+    openOverlay({ mod: "space-organizer", kind: "dialog", modal: true, width: 660, height: 600, props: { view: "folders", machine, group } });
   }
   private groupChange(change: GroupChange, cx: Context): void {
     if (checking()) return;
@@ -197,10 +200,13 @@ export default class Spaces {
     cx.notify();
   }
   private orderSpaces(sp = spaces(), ps = panes()): OrderSpace[] {
-    return sp.map(space => ({ id: space.id, machine: space.machine, repo: this.git[where(space, ps)]?.repo ?? null, linked: this.git[where(space, ps)]?.linked ?? false }));
+    return sp.map(space => {
+      const git = this.git[where(space, ps)];
+      return { id: space.id, machine: space.machine, repo: git?.repo ?? null, linked: git?.linked ?? false };
+    });
   }
-  private refreshGroups(cx: Context): void {
-    if (checking()) return;
+  private refreshGroups(cx: Context, sp = spaces(), ps = panes()): void {
+    if (checking() || this.closed) return;
     let decoded = this.store.read();
     if (!decoded.ok) {
       this.groups = emptyGroups(); this.groupError = decoded.error;
@@ -210,23 +216,26 @@ export default class Spaces {
     this.groupError = ""; this.warnedData = "";
     const intent = orderIntent(decoded.state);
     if (intent !== this.intent) { this.intent = intent; this.orderGeneration++; this.synchronizer.reset(); }
-    const sp = spaces(), ms = machines();
+    const ms = machines();
     const active = sp.find(space => space.active)?.id;
     if (active !== this.lastActive) {
       this.lastActive = active;
-      if (active) this.store.reveal(active);
+      if (active && this.store.reveal(active)) {
+        decoded = this.store.read();
+        if (!decoded.ok) return;
+      }
     }
     const missing = this.pruner.observe(decoded.state, sp, ms, Date.now());
     if (missing.length && this.store.clean(missing)) {
       const cleaned = this.store.read();
       // Host deletions must not give a conflicting order operation a fresh budget.
       if (cleaned.ok) this.intent = orderIntent(cleaned.state);
+      decoded = cleaned;
     }
-    decoded = this.store.read();
     if (!decoded.ok) return;
     this.groups = decoded.state;
     if (this.syncing) return;
-    const current = this.orderSpaces(sp), wanted = desiredOrder(current, this.groups);
+    const current = this.orderSpaces(sp, ps), wanted = desiredOrder(current, this.groups);
     const pending = wanted.some((item, index) => item.id !== current[index].id);
     if (this.orderPending !== pending) { this.orderPending = pending; cx.notify(); }
     const target = [...new Set(current.map(space => space.machine))].flatMap(machine => machineReady(ms, machine)
@@ -235,7 +244,7 @@ export default class Spaces {
     // Waiting for a disconnected machine does not consume or reset retry budget.
     if (target.every((id, index) => id === current[index].id) && wanted.some((item, index) => item.id !== current[index].id)) return;
     const step = this.synchronizer.step(current, target, Date.now());
-    if (step.warn) { notify({ title: "Space ordering paused", body: "Three attempts did not converge. Actual order is shown with group labels. Use Retry Space ordering or change membership to try again.", level: "error" }); cx.notify(); }
+    if (step.warn) { notify({ title: "Space ordering paused", body: `${step.error ?? "Three attempts did not converge."} Actual order is shown with group labels. Use Retry Space ordering or change membership to try again.`, level: "error" }); cx.notify(); }
     if (!step.moves.length) return;
     this.syncing = true;
     const generation = this.orderGeneration;
@@ -244,7 +253,7 @@ export default class Spaces {
       try {
         for (const move of step.moves) {
           cx.phase();
-          if (checking() || generation !== this.orderGeneration) break;
+          if (checking() || this.closed || generation !== this.orderGeneration) break;
           const live = spaces();
           const space = live.find(space => space.id === move.id);
           if (!space || !machineReady(machines(), space.machine) || live.length !== expected.length || live.some((space, index) => space.id !== expected[index])) break;
@@ -253,7 +262,7 @@ export default class Spaces {
           await cx.sleep(40);
         }
       } catch { /* The same bounded operation observes and retries on its next tick. */ }
-      finally { this.syncing = false; cx.notify(); }
+      finally { this.syncing = false; if (!this.closed) cx.notify(); }
     });
   }
   private refreshColors(sp: SpaceInfo[]): void {
@@ -298,20 +307,29 @@ export default class Spaces {
     // Refresh only when the refs could have changed (see `due`).
     cx.timer.every(250, (cx) => this.checkNew(cx));
     cx.spawn(async cx => {
-      for (;;) {
+      while (!this.closed) {
         const command = await nextCommand();
+        cx.phase();
+        if (this.closed || checking()) return;
         if (command === "retry-order") { this.orderGeneration++; this.synchronizer.reset(); this.refreshGroups(cx); cx.notify(); }
       }
     });
   }
 
+  close(): void {
+    this.closed = true; this.orderGeneration++; this.drag.cancel();
+    for (const pending of this.watching.values()) pending.cancel();
+    this.watching.clear(); this.pending.clear();
+  }
+
   checkNew(cx: Context) {
+    if (checking() || this.closed) return;
     const now = Date.now();
-    const sp = spaces();
+    const sp = spaces(), ps = panes();
     this.refreshColors(sp);
-    this.refreshGroups(cx);
+    this.refreshGroups(cx, sp, ps);
     for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
-    const due = this.due(now, sp, panes());
+    const due = this.due(now, sp, ps);
     if (due.size) this.refreshGit(due, cx);
     if (sp.some(s => !this.shown.has(s.id)) || this.syncing) cx.notify();
   }
@@ -423,11 +441,12 @@ export default class Spaces {
 
   // One look at a time, each place once however often it was asked for meanwhile.
   refreshGit(keys: Set<string> | string[], cx: Context) {
+    if (checking() || this.closed) return;
     for (const k of keys) this.pending.add(k);
     if (this.refreshing) return;
     this.refreshing = true;
     cx.spawn(async (cx) => {
-      while (this.pending.size) {
+      while (this.pending.size && !this.closed) {
         const keys = [...this.pending];
         this.pending.clear();
         let next = 0;
@@ -436,13 +455,13 @@ export default class Spaces {
         }));
       }
       this.refreshing = false;
-      cx.notify();
+      if (!this.closed) cx.notify();
     });
   }
 
   // One place's git: branch, ahead/behind, its repo.
   async check(key: string, cx: AsyncContext) {
-    if (checking()) return;
+    if (checking() || this.closed) return;
     const [on, cwd] = JSON.parse(key) as [string | null, string];
     this.checked[key] = Date.now();
     this.unsure.delete(key);
@@ -453,6 +472,8 @@ export default class Spaces {
         exec("git", ["rev-parse", "--path-format=absolute", "--show-toplevel"], { cwd, on }),
         exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd, on }),
       );
+      cx.phase();
+      if (this.closed || checking()) return;
       if (r.code !== 0 || common.code !== 0) {
         // Only git's own "no" is remembered as no repo; anything else is asked again.
         if (!/not a git repository/i.test(r.code !== 0 ? r.stderr : common.stderr)) {
@@ -463,13 +484,22 @@ export default class Spaces {
       }
       // The repo's own .git folder names it; a worktree's top differs from it.
       const top = r.stdout.replace(/\n$/, ""), repo = common.stdout.replace(/\n$/, "");
+      const linked = await linkedCheckout(top, repo, () => exec("git", ["rev-parse", "--path-format=absolute", "--git-dir"], { cwd, on }));
+      cx.phase();
+      if (this.closed || checking()) return;
+      if (linked === null) {
+        this.unsure.add(key); this.git[key] ??= null;
+        return; // A partial read must not turn a known worktree into a parent.
+      }
       const [branch, counts] = await both(
         exec("git", ["symbolic-ref", "-q", "HEAD"], { cwd, on }),
         exec("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], { cwd, on }),
       );
       const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
       const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
-      const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
+      cx.phase();
+      if (this.closed || checking()) return;
+      const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), linked };
       this.git[key] = info;
       if (!on) this.watch(repo, cx);
     } catch {
@@ -480,7 +510,7 @@ export default class Spaces {
   }
 
   watch(repo: string, cx: Context) {
-    if (this.watching.has(repo)) return;
+    if (this.closed || checking() || this.watching.has(repo)) return;
     const pending = watchFolder(repo);
     this.watching.set(repo, pending);
     cx.spawn(async (cx) => {
@@ -488,7 +518,8 @@ export default class Spaces {
       try {
         for (;;) {
           await current;
-          if (this.watching.get(repo) !== current) return;
+          cx.phase();
+          if (this.closed || checking() || this.watching.get(repo) !== current) return;
           const mine = JSON.stringify([null, repo]);
           const keys = Object.keys(this.git).filter((k) => this.git[k]?.repo === mine);
           if (!keys.length) break;
@@ -560,11 +591,15 @@ export default class Spaces {
         .child(div().flex_1().min_w(0).truncate().font_semibold().child(group.name))
         .child(div().flex_none().text_size(11).text_color(t.muted).child(ready ? String(members.length) : "?"))
         .when(!!status, el => el.child(div().text_color(tone(t, status)).tooltip(status!).child(glyph(status))))
-        .child(div().id(`group-new-${group.id}`).px(5).flex_none().rounded(4)
+        .child(div().id(`group-new-shield-${group.id}`).flex_none()
+          .on_mouse_down("left", (_event, cx) => { this.cancelDrag(cx); cx.stop_propagation(); })
+          .on_mouse_up("left", (_event, cx) => cx.stop_propagation())
+          .on_click((_event, cx) => cx.stop_propagation())
+          .child(Button.new(`group-new-${group.id}`).tab_stop(true).accessibility_label(`New Space in ${group.name}`).disabled(!ready || (!machine && this.creation.busy)).px(5).flex_none().rounded(4)
           .tooltip(machine ? "Choose a remote folder in this group" : "Choose a local folder in this group").when((!machine && this.creation.busy) || !ready, el => el.opacity(0.4))
           .on_mouse_down("left", (_event, cx) => { this.cancelDrag(cx); cx.stop_propagation(); })
           .on_mouse_up("left", (_event, cx) => cx.stop_propagation())
-          .on_click((_event, cx) => { cx.stop_propagation(); if (ready) { if (machine) this.remote(machine, group.id); else this.local(cx, group.id); } }).child(!machine && this.creation.busy ? "…" : "+"));
+          .on_click((_event, cx) => { cx.stop_propagation(); if (ready) { if (machine) this.remote(machine, group.id); else this.local(cx, group.id); } }).child(!machine && this.creation.busy ? "…" : "+")));
       rendered.push({ element: head, active: false });
       if (!group.folded) rendered.push(...rows.filter(row => spaceGroup(this.groups, row.w)?.id === group.id).map(drawMember));
     }
@@ -638,11 +673,13 @@ export default class Spaces {
               .tooltip(repair?.error || "This machine was rebuilt or replaced. Click to connect to the new one.")
               .on_click((_e, cx) => { cx.stop_propagation(); this.reconnect(machine, cx); })
               .child(repair?.busy ? "Connecting…" : "Connect"))))
-          .when(connected, el => el.child(div().id(`machine-add-${m ?? "local"}`).flex_none().px(4).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .when(connected, el => el.child(div().id(`machine-add-shield-${m ?? "local"}`).flex_none()
+            .on_click((_event, cx) => cx.stop_propagation())
+            .child(Button.new(`machine-add-${m ?? "local"}`).tab_stop(true).accessibility_label(`New Space on ${m ?? "this computer"}`).disabled(!m && this.creation.busy).flex_none().px(4).rounded(4).hover(s => s.bg(t.hover).text_color(t.foreground))
             .tooltip(m ? `Choose a folder on ${m}` : "Choose a local folder")
             .when(!m && this.creation.busy, el => el.opacity(0.4))
-            .on_click((_e, cx) => { cx.stop_propagation(); if (m) this.remote(m); else this.local(cx); }).child(!m && this.creation.busy ? "…" : "+")))
-          .child(div().id(`machine-menu-${m ?? "local"}`).flex_none().px(3).rounded(4).tooltip("Group actions")
+            .on_click((_e, cx) => { cx.stop_propagation(); if (m) this.remote(m); else this.local(cx); }).child(!m && this.creation.busy ? "…" : "+"))))
+          .child(Button.new(`machine-menu-${m ?? "local"}`).tab_stop(true).accessibility_label(`Group actions on ${m ?? "this computer"}`).flex_none().px(3).rounded(4).tooltip("Group actions")
             .on_click((_event, cx) => { cx.stop_propagation(); this.organizerMenu(m); }).child("⋯"))
           .child(div().size(6).rounded(3).flex_none().bg(connected ? t.ansi2 : t.dim))
           .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(11).flex_none()));
@@ -695,7 +732,7 @@ export default class Spaces {
       .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
   }
 
-  row({ w, i, g, tree, label }: Row, t: Theme, grouped = false) {
+  row({ w, g, tree, label }: Row, t: Theme, grouped = false) {
     const on = w.active;
     const colors = colorState(shared("space.colors"));
     const color = colors[w.id] ?? "ansi6";
@@ -785,11 +822,11 @@ export default class Spaces {
       .child(h_flex().h(31).flex_none().pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(collapsed, el => el.pl(0).pr(0).justify_center())
         .when(!collapsed, el => el.child("Spaces"))
-        .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
+        .child(Button.new("space-new").tab_stop(true).accessibility_label("New local Space").disabled(this.creation.busy).size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           .tooltip(this.creation.busy ? "Waiting for local folder selection or Space creation" : "Choose a local folder for a new Space")
           .when(this.creation.busy, el => el.opacity(0.4))
           .on_click((_e, cx) => this.local(cx)).child(this.creation.busy ? div().child("…") : svg("mods/workspace-chrome/plus.svg").size(14)))
-        .when(!collapsed, el => el.child(div().id("organizer-menu").size(26).flex().items_center().justify_center().rounded(6)
+        .when(!collapsed, el => el.child(Button.new("organizer-menu").tab_stop(true).accessibility_label("Group actions").size(26).flex().items_center().justify_center().rounded(6)
           .tooltip("Group actions").hover(s => s.bg(t.hover)).on_click(() => this.organizerMenu()).child("⋯"))))
       .when(!collapsed && !!this.groupError, el => el.child(div().px(12).py(5).text_size(11).text_color(t.blocked).child("Group data needs recovery. Spaces remain available.")))
       .when(!collapsed && this.orderPending, el => el.child(div().id("order-status").px(12).py(5).text_size(11).text_color(t.muted)

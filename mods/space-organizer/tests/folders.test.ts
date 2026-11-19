@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { absoluteFolder, folderRequest, childFolder, parentFolder, posixPage, windowsPage, FolderBrowser, FOLDER_LIMIT, type FolderPage } from "../src/core/folders.js";
-import { RemoteDirectory, encodedPowerShell, windowsFoldersScript, POSIX_FOLDERS, type DirectoryExec } from "../src/host/remote-directory.js";
+import { RemoteDirectory, encodedPowerShell, windowsFoldersScript, POSIX_FOLDERS, POSIX_VALIDATE_FOLDER, type DirectoryExec } from "../src/host/remote-directory.js";
 import { FolderCreation, creationCandidates, type CreationSpace } from "../src/core/creation.js";
 import { remoteCreationAdapter, type RemoteCreationApi } from "../src/host/creation-adapter.js";
 
@@ -40,6 +40,9 @@ test("Windows listing handles zero/one entries, drive roots and UNC paths", () =
   assert.deepEqual(windowsPage(windows("C:\\")).folders, []);
   assert.equal(windowsPage(windows("C:\\", ["한글 folder"])).folders[0].path, "C:\\한글 folder");
   assert.equal(windowsPage(windows("\\\\server\\share\\", ["one"])).folders[0].path, "\\\\server\\share\\one");
+});
+test("missing or malformed Windows output reports a recoverable protocol error", () => {
+  for (const output of ["", "not json", "{truncated"]) assert.throws(() => windowsPage(output), { message: "Invalid remote folder response." });
 });
 test("listing output is bounded and rejects malformed headers, names and filesystem paths", () => {
   const names = Array.from({ length: FOLDER_LIMIT + 1 }, (_, i) => `folder-${i}`);
@@ -127,6 +130,29 @@ test("closing a popup ignores delayed listings and prevents later navigation", a
   const task = browser.navigate(); browser.close(); read.resolve(posixPage(posix(), "linux")); await task;
   assert.equal(browser.page, null); assert.equal(browser.selectable, false);
   await browser.navigate("/tmp"); assert.equal(calls, 1);
+});
+
+test("typing a new address during a pending listing prevents the response from replacing it", async () => {
+  const read = deferred<FolderPage>();
+  const browser = new FolderBrowser(() => read.promise);
+  const task = browser.navigate("/first");
+  browser.noteAddressEdit();
+  read.resolve(posixPage(posix("/first"), "linux")); await task;
+  assert.equal(browser.canSyncAddress, false);
+  await browser.navigate("/typed");
+  assert.equal(browser.canSyncAddress, true);
+});
+
+test("creation preflight validates the chosen directory without enumerating children", async () => {
+  const calls: string[][] = [];
+  const reader = new RemoteDirectory("linux", async (_command, args) => {
+    calls.push(args);
+    return { code: 0, stdout: calls.length === 1 ? "linux" : posix("/chosen"), stderr: "" };
+  });
+  assert.equal(await reader.validate("/chosen"), "/chosen");
+  assert.equal(calls[1][1], POSIX_VALIDATE_FOLDER);
+  assert.equal(POSIX_VALIDATE_FOLDER.includes("for p"), false);
+  assert.equal(windowsFoldersScript("C:\\chosen", true).includes("Get-ChildItem"), false);
 });
 
 for (const platform of ["linux", "macos", "windows"] as const) test(`${platform} creation passes the selected remote path and machine unchanged and assigns only its matching new Space`, async () => {

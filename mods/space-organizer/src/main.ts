@@ -16,5 +16,5 @@ export default class SpaceOrganizer extends View {
     this.content.init(input, cx);
   }
   render(cx: Context) { return this.invalid ? div().p(12).child(this.invalid) : this.content.render(cx); }
-  close(): void { if (this.content instanceof RemoteFolders) this.content.close(); }
+  close(): void { this.content?.close(); }
 }

@@ -11,6 +11,7 @@ coverage/
 # Local SDK, verification artifacts, and worktrees
 .cache/
 artifacts/
+no_read/
 .worktrees/
 
 # Local environment values

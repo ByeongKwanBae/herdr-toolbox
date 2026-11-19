@@ -57,8 +57,16 @@ export class OrderSynchronizer {
   private pending = false;
   reset(): void { this.attempts = 0; this.at = -Infinity; this.exhausted = false; this.warned = false; this.pending = false; }
   get failed(): boolean { return this.exhausted && this.pending; }
-  step(current: readonly OrderSpace[], target: readonly string[], now: number): { moves: SpaceMove[]; warn: boolean } {
-    const plan = movePlan(current, target);
+  step(current: readonly OrderSpace[], target: readonly string[], now: number): { moves: SpaceMove[]; warn: boolean; error?: string } {
+    let plan: SpaceMove[];
+    try { plan = movePlan(current, target); }
+    catch (error) {
+      // A host snapshot outside the supported machine-block contract must not
+      // break the sidebar's refresh loop or issue a partially valid move plan.
+      this.pending = true; this.exhausted = true;
+      const warn = !this.warned; this.warned = true;
+      return { moves: [], warn, error: error instanceof Error ? error.message : String(error) };
+    }
     if (!plan.length) {
       this.pending = false;
       // Successful operations may finish, but an exhausted budget stays locked

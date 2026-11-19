@@ -10,5 +10,5 @@
     "outDir": ".cache/tests",
     "noEmitOnError": true
   },
-  "include": ["src/core/**/*.ts", "src/host/creation-adapter.ts", "src/host/group-store.ts", "src/host/remote-directory.ts", "tests/**/*.ts"]
+  "include": ["src/core/**/*.ts", "src/host/creation-adapter.ts", "src/host/group-store.ts", "src/host/remote-directory.ts", "src/host/checkout.ts", "tests/**/*.ts"]
 }

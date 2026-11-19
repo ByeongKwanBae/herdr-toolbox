@@ -1,10 +1,11 @@
 // Space actions retain Herdr 0.1.16 menu command/overlay contracts (Apache-2.0).
 import { div, type Context, type FocusHandle } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { openOverlay, closeOverlay, checking, spaces, panes, machines } from "herdr";
+import { Button, v_flex, h_flex, InputState, Input } from "gpui-base";
+import { openOverlay, closeOverlay, checking, spaces, panes } from "herdr";
 import { themeColors, safeRun as run, safeExec as exec } from "../host/herdr-adapter.js";
 import { groupStore } from "../host/groups.js";
 import { spaceGroup, type MachineKey } from "../core/model.js";
+import { linkedCheckout } from "../host/checkout.js";
 
 interface Item { label: string; id: string; choose: (cx: Context) => void }
 
@@ -19,6 +20,7 @@ export default class OrganizerOverlay {
   private selected?: string;
   private git: "main" | "linked" | null = null;
   private store = groupStore();
+  private closed = false;
   private get spaceId(): string | undefined { return typeof this.props.space === "string" ? this.props.space : undefined; }
   private get groupId(): string | undefined { return typeof this.props.group === "string" ? this.props.group : undefined; }
   private get machine(): MachineKey { return typeof this.props.machine === "string" && this.props.machine ? this.props.machine : null; }
@@ -52,15 +54,22 @@ export default class OrganizerOverlay {
               exec("git", ["rev-parse", "--show-toplevel"], { cwd: folder, on: space.machine }),
               exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: folder, on: space.machine }),
             ]);
-            if (top.code === 0 && common.code === 0) this.git = common.stdout.trim() === `${top.stdout.trim()}/.git` ? "main" : "linked";
+            if (top.code === 0 && common.code === 0) {
+              const linked = await linkedCheckout(top.stdout.replace(/\n$/, ""), common.stdout.replace(/\n$/, ""),
+                () => exec("git", ["rev-parse", "--path-format=absolute", "--git-dir"], { cwd: folder, on: space.machine }));
+              cx.phase();
+              if (this.closed || checking()) return;
+              this.git = linked ? "linked" : "main";
+            }
           } catch { /* Native non-repository menus still work. */ }
-          cx.notify();
+          if (!this.closed) cx.notify();
         });
       }
     }
   }
 
-  private dismiss(): void { if (!checking() && this.overlay) closeOverlay(this.overlay); }
+  close(): void { this.closed = true; }
+  private dismiss(): void { this.close(); if (!checking() && this.overlay) closeOverlay(this.overlay); }
   private open(props: Record<string, unknown>, dialog = false): void {
     if (checking()) return;
     this.dismiss();
@@ -136,17 +145,17 @@ export default class OrganizerOverlay {
   render(_cx: Context) {
     const t = themeColors();
     const decoded = this.store.read();
-    const button = (id: string, text: string, choose: (cx: Context) => void) => h_flex().id(id).h(32).px(12).items_center()
+    const button = (id: string, text: string, choose: (cx: Context) => void) => Button.new(id).tab_stop(true).accessibility_label(text).flex().h(32).px(12).items_center()
       .rounded(7).bg(t.raised).cursor_pointer().hover(el => el.bg(t.hover)).on_click((_event, cx) => choose(cx)).child(text);
     if (this.view === "group") {
       const deleting = this.props.action === "delete";
       const group = decoded.ok ? decoded.state.groups.find(group => group.id === this.groupId) : undefined;
-      return v_flex().id("group-dialog").track_focus(this.handle).w_full().p(18).gap(12)
+      return v_flex().id("group-dialog").role("dialog").accessibility_label(deleting ? "Delete group" : "Edit group").track_focus(this.handle).w_full().p(18).gap(12)
         .bg(t.popover).text_color(t.foreground).text_size(13)
         .on_key_down(event => { if (event.key === "escape") this.dismiss(); })
         .child(div().font_semibold().text_size(15).child(deleting ? "Delete group?" : this.props.action === "rename" ? "Rename group" : "New group"))
         .when(deleting, el => el.child(div().child(`${group?.name ?? "This group"} will be removed. Its Spaces and terminals will stay open.`)))
-        .when(!!this.input, el => el.child(Input.new(this.input!).h(36).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_color(t.foreground)))
+        .when(!!this.input, el => el.child(Input.new(this.input!).accessibility_label("Group name").h(36).px(10).rounded(8).border_1().border_color(t.input).bg(t.background).text_color(t.foreground)))
         .child(div().text_size(11).text_color(t.muted).child(deleting ? "Only group membership is removed." : "1–60 characters · unique on this machine"))
         .when(!!this.error, el => el.child(div().text_color(t.blocked).child(this.error)))
         .child(h_flex().gap(8).justify_end().child(button("group-cancel", "Cancel", () => this.dismiss()))
@@ -156,7 +165,7 @@ export default class OrganizerOverlay {
     const selectedIndex = items.findIndex(item => item.id === this.selected);
     if (selectedIndex >= 0) this.at = selectedIndex;
     this.at = Math.min(this.at, Math.max(0, items.length - 1));
-    return v_flex().id("organizer-menu").track_focus(this.handle).w_full().max_h(440).min_h(0).p(6).gap(3)
+    return v_flex().id("organizer-menu").role("menu").accessibility_label("Space Organizer actions").track_focus(this.handle).w_full().max_h(440).min_h(0).p(6).gap(3)
       .bg(t.popover).text_color(t.foreground).text_size(13)
       .on_key_down((event, cx) => {
         if (event.key === "escape") this.dismiss();
@@ -165,7 +174,7 @@ export default class OrganizerOverlay {
         else if (event.key === "up") { this.at = (this.at + items.length - 1) % items.length; this.selected = items[this.at]?.id; cx.notify(); }
       })
       .child(div().px(8).py(4).text_size(11).text_color(t.muted).child(this.props.mode === "groups" ? "Move to group" : "Space Organizer"))
-      .child(v_flex().h(Math.min(items.length * 31, 360)).flex_none().min_h(0).overflow_y_scrollbar().children(items.map((entry, index) => h_flex().id(entry.id).h(31).flex_none().px(8).items_center().rounded(6)
+      .child(v_flex().h(Math.min(items.length * 31, 360)).flex_none().min_h(0).overflow_y_scrollbar().children(items.map((entry, index) => h_flex().id(entry.id).role("menu_item").accessibility_label(entry.label).when(index === this.at, el => el.aria_active_descendant()).h(31).flex_none().px(8).items_center().rounded(6)
         .when(index === this.at, el => el.bg(t.selected)).cursor_pointer().hover(el => el.bg(t.hover))
         .on_click((_event, cx) => this.choose(entry.id, cx)).child(entry.label))))
       .when(!!this.error || !decoded.ok, el => el.child(div().px(8).text_color(t.blocked).text_size(11).child(this.error || (!decoded.ok ? decoded.error : ""))));

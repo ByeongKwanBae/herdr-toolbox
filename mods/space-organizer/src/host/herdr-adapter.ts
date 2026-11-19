@@ -15,7 +15,7 @@ export function colorState(value: unknown): Record<string, string> {
 }
 
 export function color(value: string): Color {
-  if (/^#[0-9a-f]{3,8}$/i.test(value)) return value as Color;
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value)) return value as Color;
   return "#808080";
 }
 

@@ -1,5 +1,5 @@
 import { div, svg, type Context, type FocusHandle } from "gpui-kit";
-import { h_flex, v_flex, Input, InputState } from "gpui-base";
+import { Button, h_flex, v_flex, Input, InputState } from "gpui-base";
 import { checking, machines, spaces, closeOverlay } from "herdr";
 import { FolderBrowser, parentFolder } from "../core/folders.js";
 import { FolderCreation } from "../core/creation.js";
@@ -22,6 +22,7 @@ export default class RemoteFolders {
   private creating = false;
   private closed = false;
   private error = "";
+  private addressDirty = false;
   private get inert(): boolean { return checking() || this.closed; }
   private assertReady(): void {
     if (this.inert) throw new Error("Folder selection was cancelled.");
@@ -34,7 +35,11 @@ export default class RemoteFolders {
     this.path = InputState.new({ value: "", placeholder: "Absolute path or ~ for home" });
     this.focus = cx.focus_handle();
     this.path.on("submit", (_event, cx) => this.navigate(this.path.value(), cx));
-    this.path.on("change", (_event, cx) => cx.notify());
+    this.path.on("change", (_event, cx) => {
+      this.browser?.noteAddressEdit();
+      const dirty = !!this.browser?.page && this.path.value() !== this.browser.page.path;
+      if (dirty !== this.addressDirty) { this.addressDirty = dirty; cx.notify(); }
+    });
     this.path.focus();
     if (!this.machine) { this.error = "Choose a remote machine."; return; }
     this.directory = new RemoteDirectory(this.machine, async (program, args, options) => {
@@ -52,7 +57,7 @@ export default class RemoteFolders {
     if (!checking() && this.overlay) closeOverlay(this.overlay);
   }
   private navigate(path: string | undefined, cx: Context): void {
-    if (this.inert || this.creating || !this.browser) return;
+    if (this.inert || this.creating || !this.browser || this.browser.loading) return;
     this.roots = false; this.error = "";
     const task = this.browser.navigate(path);
     cx.notify();
@@ -60,7 +65,8 @@ export default class RemoteFolders {
       const updated = await task;
       cx.phase();
       if (this.inert) return;
-      if (updated && this.browser.page) this.path.set_value(this.browser.page.path);
+      if (updated && this.browser.page && this.browser.canSyncAddress) this.path.set_value(this.browser.page.path);
+      this.addressDirty = !!this.browser.page && this.path.value() !== this.browser.page.path;
       cx.notify();
     });
   }
@@ -77,7 +83,7 @@ export default class RemoteFolders {
           ...remoteCreationAdapter({
             checking: inactive,
             ready: () => machineReady(machines(), this.machine),
-            validateFolder: async path => (await this.directory.read(path)).path,
+            validateFolder: path => this.directory.validate(path),
             spaces,
             run: safeRun,
             failed: message => { this.error = message; },
@@ -97,7 +103,7 @@ export default class RemoteFolders {
   render(_cx: Context) {
     const t = themeColors(), page = this.browser?.page;
     const busy = this.creating || !!this.browser?.loading;
-    const button = (id: string, label: string, enabled: boolean, choose: (cx: Context) => void) => h_flex().id(id).h(30).px(10).flex_none().items_center().rounded(6)
+    const button = (id: string, label: string, enabled: boolean, choose: (cx: Context) => void) => Button.new(id).disabled(!enabled).tab_stop(true).accessibility_label(label).flex().h(30).px(10).flex_none().items_center().rounded(6)
       .bg(t.raised).when(!enabled, el => el.opacity(0.4)).when(enabled, el => el.cursor_pointer().hover(el => el.bg(t.hover)))
       .on_click((_event, cx) => { if (enabled) choose(cx); }).child(label);
     const error = this.error || this.browser?.error;
@@ -106,7 +112,7 @@ export default class RemoteFolders {
     const current = this.store.read();
     const group = current.ok ? current.state.groups.find(group => group.id === this.group && group.machine === this.machine) : undefined;
     const folders = this.roots ? (page?.roots ?? []).map(path => ({ name: path, path })) : page?.folders ?? [];
-    return v_flex().id("remote-folders").track_focus(this.focus).h(560).w_full().min_h(0).p(18).gap(10)
+    return v_flex().id("remote-folders").role("dialog").accessibility_label("Choose remote folder").track_focus(this.focus).h(560).w_full().min_h(0).p(18).gap(10)
       .bg(t.popover).text_color(t.foreground).text_size(13)
       .on_key_down((event, cx) => { if (event.key === "escape") { cx.stop_propagation(); if (!this.creating) this.dismiss(); } })
       .child(h_flex().items_center().gap(8).flex_none()
@@ -115,7 +121,7 @@ export default class RemoteFolders {
         .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(this.machine)))
       .when(!!this.group, el => el.child(div().flex_none().text_size(11).text_color(group ? t.muted : t.blocked).child(group ? `New Space in group: ${group.name}` : "Destination group is unavailable. No Space will be created.")))
       .child(h_flex().gap(7).flex_none()
-        .child(Input.new(this.path).h(34).flex_1().min_w(0).px(9).rounded(6).border_1().border_color(t.input).bg(t.background).text_color(t.foreground))
+        .child(Input.new(this.path).accessibility_label("Remote folder path").h(34).flex_1().min_w(0).px(9).rounded(6).border_1().border_color(t.input).bg(t.background).text_color(t.foreground))
         .child(button("folder-go", "Go", !busy && !!this.browser, cx => this.navigate(this.path.value(), cx))))
       .child(h_flex().gap(6).flex_none()
         .child(button("folder-home", "Home", !busy && !!this.browser, cx => this.navigate(undefined, cx)))
@@ -125,7 +131,7 @@ export default class RemoteFolders {
         .child(div().flex_1()).when(!!page, el => el.child(div().text_size(11).text_color(t.muted).child(page!.platform))))
       .child(v_flex().id("folder-list").flex_1().min_h(0).overflow_hidden().overflow_y_scrollbar().p(4).rounded(6).border_1().border_color(t.border)
         .when(busy, el => el.child(div().p(12).text_color(t.muted).child(this.creating ? "Creating Space…" : "Loading folders…")))
-        .when(!busy, el => el.children(folders.map(entry => h_flex().id(`folder-${entry.path}`).h(29).flex_none().px(8).gap(8).items_center().rounded(5).cursor_pointer().hover(el => el.bg(t.hover))
+        .when(!busy, el => el.children(folders.map(entry => Button.new(`folder-${entry.path}`).tab_stop(true).accessibility_label(`Open ${entry.name}`).flex().w_full().h(29).flex_none().px(8).gap(8).items_center().rounded(5).cursor_pointer().hover(el => el.bg(t.hover))
           .tooltip(entry.path).on_click((_event, cx) => this.navigate(entry.path, cx))
           .child(svg("mods/workspace-chrome/folder.svg").size(14).flex_none().text_color(t.accent))
           .child(div().flex_1().min_w(0).truncate().child(entry.name))))
